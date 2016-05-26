@@ -677,7 +677,7 @@ void display_init(uint orientation)
 	//display_wait(50);
 	display_set_csx(0);
 	spi_write_com(0x36);
-	spi_write_dat(0x40);
+	spi_write_dat(0b00000000);
 	display_set_csx(1);
 	if(readback==1)HX8357_read_register_n(0,0x36,2);
 	//display_wait(50);

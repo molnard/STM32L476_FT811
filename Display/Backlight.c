@@ -20,5 +20,5 @@ void backlight_init()
 	delay(100);
 	backlight_enable(1);
 	delay(100);
-	I2C_WriteReg(I2C1_ADDRESS_LCDBACKLIGHT,0x10,0b00011111);
+	I2C_WriteReg(&hi2c1_os,I2C1_ADDRESS_LCDBACKLIGHT,0x10,0b00011111);
 }

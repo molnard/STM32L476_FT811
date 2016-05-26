@@ -108,7 +108,7 @@ Revision History:
 /* SPI specific macros - compile time switches for SPI single, dial and quad use cases */
 //#define ENABLE_SPI_SINGLE							(1)
 //#define ENABLE_SPI_DUAL								(1)
-#define ENABLE_SPI_QUAD								(1)
+//#define ENABLE_SPI_QUAD								(1)
 
 /* Display driver configurations - mainly for ME900EV1 modules */
 //#define ENABLE_ILI9488_HVGA_PORTRAIT				(1)

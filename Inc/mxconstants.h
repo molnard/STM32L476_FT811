@@ -38,8 +38,24 @@
 
 /* Private define ------------------------------------------------------------*/
 
+#define TP_RESET_Pin GPIO_PIN_2
+#define TP_RESET_GPIO_Port GPIOE
+#define TP_WAKE_Pin GPIO_PIN_4
+#define TP_WAKE_GPIO_Port GPIOE
+#define TP_INT__Pin GPIO_PIN_5
+#define TP_INT__GPIO_Port GPIOE
+#define CHARGE_EN_Pin GPIO_PIN_6
+#define CHARGE_EN_GPIO_Port GPIOE
+#define TP_SCL_Pin GPIO_PIN_0
+#define TP_SCL_GPIO_Port GPIOC
+#define TP_SDA_Pin GPIO_PIN_1
+#define TP_SDA_GPIO_Port GPIOC
+#define FT_INT__Pin GPIO_PIN_1
+#define FT_INT__GPIO_Port GPIOB
 #define FT811_POWERD__Pin GPIO_PIN_7
 #define FT811_POWERD__GPIO_Port GPIOE
+#define DC_ON_Pin GPIO_PIN_14
+#define DC_ON_GPIO_Port GPIOD
 #define LED_Status_GREEN_Pin GPIO_PIN_4
 #define LED_Status_GREEN_GPIO_Port GPIOD
 #define LCD_CS__Pin GPIO_PIN_7

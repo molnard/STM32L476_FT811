@@ -52,6 +52,7 @@ void BusFault_Handler(void);
 void UsageFault_Handler(void);
 void DebugMon_Handler(void);
 void SysTick_Handler(void);
+void EXTI1_IRQHandler(void);
 void TIM1_UP_TIM16_IRQHandler(void);
 void SDMMC1_IRQHandler(void);
 void DMA2_Channel4_IRQHandler(void);

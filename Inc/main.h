@@ -15,13 +15,17 @@
 #include "i2c.h"
 #include "HX8357.h"
 #include "sd_diskio.h"
+#include "eeprom.h"
 
 #define delay(x) osDelay(x)
 
 extern QSPI_HandleTypeDef hqspi;
-extern I2C_HandleTypeDef hi2c1;
 extern SD_HandleTypeDef hsd1;
 extern HAL_SD_CardInfoTypedef SDCardInfo1;
+extern I2C_Instance_t hi2c1_os;
+extern I2C_Instance_t hi2c2_os;
+extern UART_HandleTypeDef huart2;
+extern RTC_HandleTypeDef hrtc;
 
 void HAL_Error_Handler(HAL_StatusTypeDef res);
 

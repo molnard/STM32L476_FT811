@@ -39,12 +39,19 @@
 /* USER CODE BEGIN Includes */
 #include "Graphics.h"
 #include "stm32l476g_eval_sd.h"
+#include "Ncp5623.h"
+#include "logoLedTask.h"
+#include "eeprom.h"
+#include "MainTask.h"
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef hi2c2;
 
 QSPI_HandleTypeDef hqspi;
+
+RTC_HandleTypeDef hrtc;
 
 SD_HandleTypeDef hsd1;
 HAL_SD_CardInfoTypedef SDCardInfo1;
@@ -53,10 +60,12 @@ DMA_HandleTypeDef hdma_sdmmc1_rx;
 UART_HandleTypeDef huart2;
 
 osThreadId defaultTaskHandle;
+osThreadId logoLedTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-
+I2C_Instance_t hi2c1_os;
+I2C_Instance_t hi2c2_os;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,7 +76,10 @@ static void MX_QUADSPI_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
+static void MX_I2C2_Init(void);
+static void MX_RTC_Init(void);
 void StartDefaultTask(void const * argument);
+extern void StartLogoLedTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -76,14 +88,9 @@ void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN 0 */
 
-int _write(int fd, char *str, int len)
-{
-  /* Place your implementation of fputc here */
-  /* e.g. write a character to the USART1 and Loop until the end of transmission */
-  HAL_UART_Transmit(&huart2, (uint8_t *)str, len, 0xFFFF);
 
-  return len;
-}
+
+
 
 void HAL_Error_Handler(HAL_StatusTypeDef res)
 {
@@ -122,8 +129,12 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   MX_SDMMC1_SD_Init();
+  MX_I2C2_Init();
+  MX_RTC_Init();
 
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(GPIOD,GPIO_PIN_14,GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOE,GPIO_PIN_6,GPIO_PIN_SET);
 
   /* USER CODE END 2 */
 
@@ -141,11 +152,16 @@ int main(void)
 
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 8000);
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 10000);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+
+  /* definition and creation of logoLedTask */
+  osThreadDef(logoLedTask, StartLogoLedTask, osPriorityAboveNormal, 0, 512);
+  logoLedTaskHandle = osThreadCreate(osThread(logoLedTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  osThreadSuspend(logoLedTaskHandle);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
@@ -165,7 +181,6 @@ int main(void)
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
-
   }
   /* USER CODE END 3 */
 
@@ -180,8 +195,9 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct;
   RCC_PeriphCLKInitTypeDef PeriphClkInit;
 
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
@@ -199,10 +215,13 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
   HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4);
 
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2|RCC_PERIPHCLK_I2C1
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC|RCC_PERIPHCLK_USART2
+                              |RCC_PERIPHCLK_I2C1|RCC_PERIPHCLK_I2C2
                               |RCC_PERIPHCLK_USB|RCC_PERIPHCLK_SDMMC1;
   PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_PCLK1;
+  PeriphClkInit.I2c2ClockSelection = RCC_I2C2CLKSOURCE_PCLK1;
+  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
   PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLLSAI1;
   PeriphClkInit.Sdmmc1ClockSelection = RCC_SDMMC1CLKSOURCE_PLLSAI1;
   PeriphClkInit.PLLSAI1.PLLSAI1N = 12;
@@ -245,6 +264,27 @@ void MX_I2C1_Init(void)
 
 }
 
+/* I2C2 init function */
+void MX_I2C2_Init(void)
+{
+
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.Timing = 0x10909CEC;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  HAL_I2C_Init(&hi2c2);
+
+    /**Configure Analogue filter 
+    */
+  HAL_I2CEx_ConfigAnalogFilter(&hi2c2, I2C_ANALOGFILTER_ENABLE);
+
+}
+
 /* QUADSPI init function */
 void MX_QUADSPI_Init(void)
 {
@@ -257,6 +297,57 @@ void MX_QUADSPI_Init(void)
   hqspi.Init.ChipSelectHighTime = QSPI_CS_HIGH_TIME_1_CYCLE;
   hqspi.Init.ClockMode = QSPI_CLOCK_MODE_0;
   HAL_QSPI_Init(&hqspi);
+
+}
+
+/* RTC init function */
+void MX_RTC_Init(void)
+{
+
+  RTC_TimeTypeDef sTime;
+  RTC_DateTypeDef sDate;
+  RTC_AlarmTypeDef sAlarm;
+
+    /**Initialize RTC and set the Time and Date 
+    */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutRemap = RTC_OUTPUT_REMAP_NONE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  HAL_RTC_Init(&hrtc);
+
+  sTime.Hours = 0x0;
+  sTime.Minutes = 0x0;
+  sTime.Seconds = 0x0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_SET;
+  HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD);
+
+  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
+  sDate.Month = RTC_MONTH_JANUARY;
+  sDate.Date = 0x1;
+  sDate.Year = 0x0;
+
+  HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD);
+
+    /**Enable the Alarm A 
+    */
+  sAlarm.AlarmTime.Hours = 0x0;
+  sAlarm.AlarmTime.Minutes = 0x0;
+  sAlarm.AlarmTime.Seconds = 0x0;
+  sAlarm.AlarmTime.SubSeconds = 0x0;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_SET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 0x1;
+  sAlarm.Alarm = RTC_ALARM_A;
+  HAL_RTC_SetAlarm(&hrtc, &sAlarm, RTC_FORMAT_BCD);
 
 }
 
@@ -323,28 +414,44 @@ void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct;
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(FT811_POWERD__GPIO_Port, FT811_POWERD__Pin, GPIO_PIN_RESET);
+  /*Configure GPIO pins : TP_RESET_Pin TP_INT__Pin */
+  GPIO_InitStruct.Pin = TP_RESET_Pin|TP_INT__Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, LED_Status_GREEN_Pin|LCD_CS__Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, Backlight_enable_Pin|LCD_SCK_Pin|LCD_reset__Pin|LCD_SDA_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : FT811_POWERD__Pin */
-  GPIO_InitStruct.Pin = FT811_POWERD__Pin;
+  /*Configure GPIO pins : TP_WAKE_Pin CHARGE_EN_Pin FT811_POWERD__Pin */
+  GPIO_InitStruct.Pin = TP_WAKE_Pin|CHARGE_EN_Pin|FT811_POWERD__Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(FT811_POWERD__GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : TP_SCL_Pin TP_SDA_Pin */
+  GPIO_InitStruct.Pin = TP_SCL_Pin|TP_SDA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : FT_INT__Pin */
+  GPIO_InitStruct.Pin = FT_INT__Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(FT_INT__GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DC_ON_Pin */
+  GPIO_InitStruct.Pin = DC_ON_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(DC_ON_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED_Status_GREEN_Pin LCD_CS__Pin */
   GPIO_InitStruct.Pin = LED_Status_GREEN_Pin|LCD_CS__Pin;
@@ -367,11 +474,36 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOE, TP_WAKE_Pin|CHARGE_EN_Pin|FT811_POWERD__Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, DC_ON_Pin|LED_Status_GREEN_Pin|LCD_CS__Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, Backlight_enable_Pin|LCD_SCK_Pin|LCD_reset__Pin|LCD_SDA_Pin, GPIO_PIN_RESET);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
 }
 
 /* USER CODE BEGIN 4 */
 
+/**
+  * @brief  GPIO EXTI Callback function
+  * @param  GPIO_Pin
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
 
+  if (GPIO_Pin == GPIO_PIN_1)
+  {
+
+  }
+}
 
 /* USER CODE END 4 */
 
@@ -382,49 +514,17 @@ void StartDefaultTask(void const * argument)
   MX_FATFS_Init();
 
   /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
+  //MX_USB_DEVICE_Init();
 
   /* USER CODE BEGIN 5 */
-
-
-  I2C_Init();
-  backlight_init();
-  display_init(1);
-  graphics_init();
-  SAMAPP_GPU_Points();
-  int screen=3;
-  /* Infinite loop */
-  for(;;)
-  {
-    switch (screen) {
-
-
-		case 3:
-			SAMAPP_GPU_Clear();
-			printf("clear drawed\r\n");
-		break;
-		case 0:
-			SAMAPP_GPU_Points();
-			printf("points drawed\r\n");
-			break;
-		case 1:
-			SAMAPP_GPU_Lines();
-			printf("lines drawed\r\n");
-			break;
-		case 2:
-			SAMAPP_GPU_Rectangles();
-			printf("rectangles drawed\r\n");
-			break;
-
-		default:
-			break;
-	}
-
-	HAL_GPIO_TogglePin(GPIOD,GPIO_PIN_4);
-	osDelay(2000);
-	screen++;
-	if (screen>=4) screen=0;
-  }
+	I2C_Init(&hi2c1_os,&hi2c1);
+	I2C_Init(&hi2c2_os,&hi2c2);
+	ncp5623_init();
+	backlight_init();
+	display_init(1);
+	graphics_init();
+	osThreadResume(logoLedTaskHandle);
+	StartMainTask();
   /* USER CODE END 5 */ 
 }
 
@@ -440,8 +540,8 @@ void StartDefaultTask(void const * argument)
 void assert_failed(uint8_t* file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-    ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* User can add his own implementation to report the file name and line number,*/
+  printf("Wrong parameters value: file %s on line %d\r\n", file, line);
   /* USER CODE END 6 */
 
 }

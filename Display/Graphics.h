@@ -12,6 +12,7 @@
 #include "FT_Platform.h"
 #include "Backlight.h"
 
+#define BUFFER_OPTIMIZATION 1
 #define SAMAPP_Lenaface40_SIZE (2769)
 #define SAMAPP_Mandrill256_SIZE (14368)
 #define SAMAPP_Roboto_BoldCondensed_12_SIZE (19348)
@@ -165,6 +166,12 @@ typedef struct Squares
   ft_uint16_t x, y;
 }Squares;
 
+typedef struct Touch_Event
+{
+  ft_uint16_t x, y;
+  ft_bool_t isValid;
+}Touch_Event;
+
 #define APPBUFFERSIZE					(65536L)
 #define APPBUFFERSIZEMINUSONE		(APPBUFFERSIZE - 1)
 
@@ -281,10 +288,18 @@ ft_void_t MovingPoints();
   ft_void_t CheckTouch_tile(Squares *Sq, ft_int32_t TouchXY,ft_uint8_t TouchNo);
   ft_void_t MainWindow();
 
-
+  ft_void_t	Graphics_Test();
+  ft_void_t StartupScreen();
   ft_void_t graphics_init();
+  ft_void_t SAMAPP_Touch();
+  ft_void_t SAMAPP_CoPro_Loadimage();
+
+  ft_bool_t Touch_IsTouched();
+  Touch_Event* Touch_GetEvent();
+  ft_void_t Touch_LoadCalibration();
 
 
+  void myLoadJpeg(uint16_t x,uint16_t y,char * filename);
 
 #endif /* GRAPHICS_H_ */
   /* Nothing beyond this */

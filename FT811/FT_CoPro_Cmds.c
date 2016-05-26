@@ -369,7 +369,6 @@ ft_void_t Ft_Gpu_CoCmd_Calibrate(Ft_Gpu_Hal_Context_t *phost,ft_uint32_t result)
   Ft_Gpu_Copro_SendCmd(phost, CMD_CALIBRATE);
   Ft_Gpu_Copro_SendCmd(phost, result);
   Ft_Gpu_CoCmd_EndFunc(phost,(FT_CMD_SIZE*2));   
-  Ft_Gpu_Hal_WaitCmdfifo_empty(phost);
   
 }
 ft_void_t Ft_Gpu_CoCmd_SetFont(Ft_Gpu_Hal_Context_t *phost,ft_uint32_t font, ft_uint32_t ptr)
@@ -412,7 +411,7 @@ ft_void_t Ft_Gpu_CoCmd_Scale(Ft_Gpu_Hal_Context_t *phost,ft_int32_t sx, ft_int32
 }
 ft_void_t Ft_Gpu_CoCmd_Clock(Ft_Gpu_Hal_Context_t *phost,ft_int16_t x, ft_int16_t y, ft_int16_t r, ft_uint16_t options, ft_uint16_t h, ft_uint16_t m, ft_uint16_t s, ft_uint16_t ms)
 {
-  Ft_Gpu_CoCmd_StartFunc(phost,FT_CMD_SIZE*5);         
+  Ft_Gpu_CoCmd_StartFunc(phost,FT_CMD_SIZE*5);
   Ft_Gpu_Copro_SendCmd(phost, CMD_CLOCK);
   Ft_Gpu_Copro_SendCmd(phost, (((ft_uint32_t)y<<16)|(x & 0xffff)));
   Ft_Gpu_Copro_SendCmd(phost, (((ft_uint32_t)options<<16)|(r&0xffff)));
@@ -614,7 +613,10 @@ ft_void_t Ft_Gpu_Copro_SendCmd(Ft_Gpu_Hal_Context_t *phost,ft_uint32_t cmd)
 #ifdef FT900_PLATFORM
    Ft_Gpu_Hal_Transfer32(phost,cmd);
 #endif
+   Ft_App_WrCoCmd_Buffer(phost,cmd); //nem emgy
+   //Ft_Gpu_Hal_WrCmd32(phost,cmd); //ez jó
 }
+
 
 ft_void_t Ft_Gpu_CoCmd_SendStr(Ft_Gpu_Hal_Context_t *phost,const ft_char8_t *s)
 {
@@ -640,6 +642,8 @@ ft_void_t Ft_Gpu_CoCmd_SendStr(Ft_Gpu_Hal_Context_t *phost,const ft_char8_t *s)
 #ifdef FT900_PLATFORM
   Ft_Gpu_Hal_TransferString(phost,s);
 #endif
+
+  Ft_App_WrCoStr_Buffer(phost,s);
 }
 
 
@@ -663,6 +667,8 @@ ft_void_t Ft_Gpu_CoCmd_StartFunc(Ft_Gpu_Hal_Context_t *phost,ft_uint16_t count)
     Ft_Gpu_Hal_StartCmdTransfer(phost,FT_GPU_WRITE,count);
 #endif
 #endif
+  	Ft_Gpu_Hal_CheckCmdBuffer(phost,count);
+    Ft_Gpu_Hal_StartCmdTransfer(phost,FT_GPU_WRITE,count);
 }
 
 
@@ -687,7 +693,8 @@ ft_void_t Ft_Gpu_CoCmd_EndFunc(Ft_Gpu_Hal_Context_t *phost,ft_uint16_t count)
   Ft_Gpu_Hal_Updatecmdfifo(phost,count);
 #endif
 #endif
-
+  Ft_Gpu_Hal_EndTransfer(phost);
+  Ft_Gpu_Hal_Updatecmdfifo(phost,count);
 }
 /* Nothing beyond this */
 

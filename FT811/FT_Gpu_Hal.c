@@ -30,6 +30,9 @@ Revision History:
 
 #include "FT_Platform.h"
 #include "main.h"
+
+static uint32_t _transferMemAddress;
+
 /* API to initialize the SPI interface */
 ft_bool_t  Ft_Gpu_Hal_Init(Ft_Gpu_HalInit_t *halinit) //Unused!
 {
@@ -171,9 +174,11 @@ ft_void_t Ft_Gpu_Hal_DeInit()
 #endif
 }
 
+
 /*The APIs for reading/writing transfer continuously only with small buffer system*/
 ft_void_t  Ft_Gpu_Hal_StartTransfer(Ft_Gpu_Hal_Context_t *host,FT_GPU_TRANSFERDIR_T rw,ft_uint32_t addr)
 {
+	_transferMemAddress = addr; //we store the address for further writing
 	if (FT_GPU_READ == rw){
 
 #ifdef FT900_PLATFORM
@@ -337,18 +342,48 @@ ft_uint32_t  Ft_Gpu_Hal_Transfer32(Ft_Gpu_Hal_Context_t *host,ft_uint32_t value)
 	}
 	return retVal;
 }
-
-ft_void_t  Ft_Gpu_Hal_WriteN(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr ,ft_uint8_t* toWriteLSBFirst,ft_uint32_t size)
+static uint32_t getQspiAddressMode(Ft_Gpu_Hal_Context_t *host)
 {
-	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_WRITE,addr);
+	switch (host->spichannel) {
+		case FT_GPU_SPI_QUAD_CHANNEL:
+				return QSPI_ADDRESS_4_LINES;
+			break;
+		case FT_GPU_SPI_DUAL_CHANNEL:
+				return QSPI_ADDRESS_2_LINES;
+			break;
+	}
+	return QSPI_ADDRESS_1_LINE;
+}
+static uint32_t getQspiDataMode(Ft_Gpu_Hal_Context_t *host)
+{
+	switch (host->spichannel) {
+		case FT_GPU_SPI_QUAD_CHANNEL:
+				return QSPI_DATA_4_LINES;
+			break;
+		case FT_GPU_SPI_DUAL_CHANNEL:
+				return QSPI_DATA_2_LINES;
+			break;
+	}
+	return QSPI_DATA_1_LINE;
+}
+
+ft_void_t  Ft_Gpu_Hal_WriteN(Ft_Gpu_Hal_Context_t *host,ft_uint8_t* toWriteLSBFirst,ft_uint32_t size)
+{
+//	printf("write! address: %u, size:%u (",_transferMemAddress,size);
+//	for (int i=0;i<size;i++)
+//	{
+//		printf("%u,",toWriteLSBFirst[i]);
+//	}
+//	printf(")\r\n");
+	HAL_Error_Handler(host->status != FT_GPU_HAL_WRITING || _transferMemAddress==0);
 	QSPI_CommandTypeDef sCommand;
 	sCommand.InstructionMode   = QSPI_INSTRUCTION_NONE;
 	sCommand.Instruction       = 0;
-	sCommand.AddressMode       = QSPI_ADDRESS_1_LINE;
+	sCommand.AddressMode       = getQspiAddressMode(host);
 	sCommand.AddressSize       = QSPI_ADDRESS_24_BITS;
-	sCommand.Address           = addr | 0x800000;
+	sCommand.Address           = _transferMemAddress | 0x800000; //set the write bit!
 	sCommand.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
-	sCommand.DataMode          = QSPI_DATA_1_LINE;
+	sCommand.DataMode          = getQspiDataMode(host);
 	sCommand.DummyCycles       = 0;
 	sCommand.NbData            = size;
 	sCommand.DdrMode           = QSPI_DDR_MODE_DISABLE;
@@ -356,19 +391,21 @@ ft_void_t  Ft_Gpu_Hal_WriteN(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr ,ft_uin
 	sCommand.SIOOMode          = QSPI_SIOO_INST_ONLY_FIRST_CMD;
 	HAL_Error_Handler(HAL_QSPI_Command(&hqspi, &sCommand, HAL_QPSI_TIMEOUT_DEFAULT_VALUE));
 	HAL_Error_Handler(HAL_QSPI_Transmit(&hqspi,toWriteLSBFirst,HAL_QPSI_TIMEOUT_DEFAULT_VALUE));
-	Ft_Gpu_Hal_EndTransfer(host);
+
+
+
 }
-ft_void_t Ft_Gpu_Hal_RdN(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr,ft_uint8_t* fromReadLSBFirst,ft_uint32_t size)
+ft_void_t Ft_Gpu_Hal_RdN(Ft_Gpu_Hal_Context_t *host,ft_uint8_t* fromReadLSBFirst,ft_uint32_t size)
 {
-	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_READ,addr);
+	HAL_Error_Handler(host->status != FT_GPU_HAL_READING || _transferMemAddress==0);
 	QSPI_CommandTypeDef sCommand;
 	sCommand.InstructionMode   = QSPI_INSTRUCTION_NONE;
 	sCommand.Instruction       = 0;
-	sCommand.AddressMode       = QSPI_ADDRESS_1_LINE;
+	sCommand.AddressMode       = getQspiAddressMode(host);
 	sCommand.AddressSize       = QSPI_ADDRESS_24_BITS;
-	sCommand.Address           = addr;
+	sCommand.Address           = _transferMemAddress;
 	sCommand.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
-	sCommand.DataMode          = QSPI_DATA_1_LINE;
+	sCommand.DataMode          = getQspiDataMode(host);
 	sCommand.DummyCycles       = 8;
 	sCommand.NbData            = size;
 	sCommand.DdrMode           = QSPI_DDR_MODE_DISABLE;
@@ -376,8 +413,9 @@ ft_void_t Ft_Gpu_Hal_RdN(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr,ft_uint8_t*
 	sCommand.SIOOMode          = QSPI_SIOO_INST_ONLY_FIRST_CMD;
 	HAL_Error_Handler(HAL_QSPI_Command(&hqspi, &sCommand, HAL_QPSI_TIMEOUT_DEFAULT_VALUE));
 	HAL_Error_Handler(HAL_QSPI_Receive(&hqspi,fromReadLSBFirst,HAL_QPSI_TIMEOUT_DEFAULT_VALUE));
-	Ft_Gpu_Hal_EndTransfer(host);
+
 }
+
 
 
 
@@ -399,60 +437,52 @@ ft_void_t   Ft_Gpu_Hal_EndTransfer(Ft_Gpu_Hal_Context_t *host)
 	Ft_GpuEmu_SPII2C_csHigh();
 #endif
 	host->status = FT_GPU_HAL_OPENED;
+	_transferMemAddress=0;
 }
 
 
 ft_uint8_t  Ft_Gpu_Hal_Rd8(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr)
 {
-//	ft_uint8_t readbuff[1];
-//	Ft_Gpu_Hal_RdN(host,addr,readbuff,1);
-//	return readbuff[0];
+	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_READ,addr);
 	ft_uint8_t readbuff = 0;
-	Ft_Gpu_Hal_RdN(host,addr,(uint8_t*)&readbuff,1);
+	Ft_Gpu_Hal_RdN(host,(uint8_t*)&readbuff,1);
+	Ft_Gpu_Hal_EndTransfer(host);
 	return readbuff;
 }
 ft_uint16_t Ft_Gpu_Hal_Rd16(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr)
 {
-//	ft_uint8_t readbuff[2];
-//	Ft_Gpu_Hal_RdN(host,addr,readbuff,2);
-//	return readbuff[0] | readbuff[1]<<8;
+	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_READ,addr);
 	ft_uint32_t readbuff = 0;
-	Ft_Gpu_Hal_RdN(host,addr,(uint8_t*)&readbuff,2);
+	Ft_Gpu_Hal_RdN(host,(uint8_t*)&readbuff,2);
+	Ft_Gpu_Hal_EndTransfer(host);
 	return readbuff;
 }
 ft_uint32_t Ft_Gpu_Hal_Rd32(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr)
 {
-//	ft_uint8_t readbuff[4];
-//	Ft_Gpu_Hal_RdN(host,addr,readbuff,4);
-//	return readbuff[0] | readbuff[1]<<8 | readbuff[2]<<16 | readbuff[3]<<24;
+	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_READ,addr);
 	ft_uint32_t readbuff = 0;
-	Ft_Gpu_Hal_RdN(host,addr,(uint8_t*)&readbuff,4);
+	Ft_Gpu_Hal_RdN(host,(uint8_t*)&readbuff,4);
+	Ft_Gpu_Hal_EndTransfer(host);
 	return readbuff;
 }
 
 ft_void_t Ft_Gpu_Hal_Wr8(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr, ft_uint8_t v)
 {	
-//	ft_uint8_t writebuff[1];
-//	writebuff[0] = v;
-	Ft_Gpu_Hal_WriteN(host,addr,(uint8_t*)&v,1);
+	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_WRITE,addr);
+	Ft_Gpu_Hal_WriteN(host,(uint8_t*)&v,1);
+	Ft_Gpu_Hal_EndTransfer(host);
 }
 ft_void_t Ft_Gpu_Hal_Wr16(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr, ft_uint16_t v)
 {
-//	ft_uint8_t writebuff[2];
-//	writebuff[0] =  v & 0xFF;//LSB first
-//	writebuff[1] = (v >> 8) & 0xFF;
-//	Ft_Gpu_Hal_WriteN(host,addr,writebuff,2);
-	Ft_Gpu_Hal_WriteN(host,addr,(uint8_t*)&v,2);
+	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_WRITE,addr);
+	Ft_Gpu_Hal_WriteN(host,(uint8_t*)&v,2);
+	Ft_Gpu_Hal_EndTransfer(host);
 }
 ft_void_t Ft_Gpu_Hal_Wr32(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr, ft_uint32_t v)
 {
-//	ft_uint8_t writebuff[4];
-//	writebuff[0] =  v & 0xFF;//LSB first
-//	writebuff[1] = (v >> 8) & 0xFF;
-//	writebuff[2] = (v >> 16) & 0xFF;
-//	writebuff[3] = (v >> 24) & 0xFF;
-//  Ft_Gpu_Hal_WriteN(host,addr,writebuff,4);
-	Ft_Gpu_Hal_WriteN(host,addr,(uint8_t*)&v,4);
+	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_WRITE,addr);
+	Ft_Gpu_Hal_WriteN(host,(uint8_t*)&v,4);
+	Ft_Gpu_Hal_EndTransfer(host);
 }
 
 ft_void_t Ft_Gpu_HostCommand(Ft_Gpu_Hal_Context_t *host,ft_uint8_t cmd)
@@ -589,6 +619,9 @@ ft_void_t Ft_Gpu_Hal_WrCmdBuf(Ft_Gpu_Hal_Context_t *host,ft_uint8_t *buffer,ft_u
       	        Ft_Gpu_Hal_CheckCmdBuffer(host,length);
 
                 Ft_Gpu_Hal_StartCmdTransfer(host,FT_GPU_WRITE,length);
+
+        		Ft_Gpu_Hal_WriteN(host,buffer,length);
+        		buffer += length;
 #ifdef FT900_PLATFORM
         spi_writen(SPIM,buffer,length);
         buffer += length;
@@ -664,9 +697,8 @@ ft_void_t Ft_Gpu_Hal_CheckCmdBuffer(Ft_Gpu_Hal_Context_t *host,ft_uint32_t count
 }
 ft_void_t Ft_Gpu_Hal_WaitCmdfifo_empty(Ft_Gpu_Hal_Context_t *host)
 {
-   while(Ft_Gpu_Hal_Rd16(host,REG_CMD_READ) != Ft_Gpu_Hal_Rd16(host,REG_CMD_WRITE));
-   
-   host->ft_cmd_fifo_wp = Ft_Gpu_Hal_Rd16(host,REG_CMD_WRITE);
+	while(Ft_Gpu_Hal_Rd16(host,REG_CMD_WRITE) != Ft_Gpu_Hal_Rd16(host,REG_CMD_READ));
+	host->ft_cmd_fifo_wp = Ft_Gpu_Hal_Rd16(host,REG_CMD_WRITE);
 }
 
 ft_void_t Ft_Gpu_Hal_WrCmdBuf_nowait(Ft_Gpu_Hal_Context_t *host,ft_uint8_t *buffer,ft_uint32_t count)
@@ -674,7 +706,7 @@ ft_void_t Ft_Gpu_Hal_WrCmdBuf_nowait(Ft_Gpu_Hal_Context_t *host,ft_uint8_t *buff
 	ft_uint32_t length =0, SizeTransfered = 0;   
 
 #define MAX_CMD_FIFO_TRANSFER   Ft_Gpu_Cmdfifo_Freespace(host)  
-	do {                
+	do {
 		length = count;
 		if (length > MAX_CMD_FIFO_TRANSFER){
 		    length = MAX_CMD_FIFO_TRANSFER;
@@ -682,6 +714,9 @@ ft_void_t Ft_Gpu_Hal_WrCmdBuf_nowait(Ft_Gpu_Hal_Context_t *host,ft_uint8_t *buff
       	        Ft_Gpu_Hal_CheckCmdBuffer(host,length);
 
                 Ft_Gpu_Hal_StartCmdTransfer(host,FT_GPU_WRITE,length);
+
+        		Ft_Gpu_Hal_WriteN(host,buffer,length);
+        		buffer += length;
 #ifdef FT900_PLATFORM
             spi_writen(SPIM,buffer,length);
 		    buffer += length;
@@ -851,9 +886,10 @@ ft_void_t Ft_Gpu_Hal_WrMemFromFlash(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr,
 	Ft_Gpu_Hal_EndTransfer(host);
 }
 
+
 ft_void_t Ft_Gpu_Hal_WrMem(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr,const ft_uint8_t *buffer, ft_uint32_t length)
 {
-	ft_uint32_t SizeTransfered = 0;      
+	//ft_uint32_t SizeTransfered = 0;
 
 	Ft_Gpu_Hal_StartTransfer(host,FT_GPU_WRITE,addr);
 #ifdef FT900_PLATFORM
@@ -874,7 +910,11 @@ ft_void_t Ft_Gpu_Hal_WrMem(Ft_Gpu_Hal_Context_t *host,ft_uint32_t addr,const ft_
 	}
 #endif
 
-
+	Ft_Gpu_Hal_WriteN(host,buffer,length);
+//	while (length--) {
+//            Ft_Gpu_Hal_Wr8(host,addr,*buffer);
+//	    buffer++;
+//	}
 	Ft_Gpu_Hal_EndTransfer(host);
 }
 
@@ -971,16 +1011,18 @@ ft_int16_t Ft_Gpu_Hal_SetSPI(Ft_Gpu_Hal_Context_t *host,FT_GPU_SPI_NUMCHANNELS_T
 		return -1;//error
 	}
 
-	host->spichannel = numchnls;
-	writebyte = host->spichannel;
-	host->spinumdummy = numdummy;
 
-	if(FT_GPU_SPI_TWODUMMY == host->spinumdummy)
+	writebyte = numchnls;
+
+
+	if(FT_GPU_SPI_TWODUMMY == numdummy)
 	{
 		writebyte |= FT_SPI_TWO_DUMMY_BYTE;
 	}
 	Ft_Gpu_Hal_Wr8(host,REG_SPI_WIDTH,writebyte);
 	/* set the parameters in hal context and also set into ft81x */
+	host->spichannel = numchnls;
+	host->spinumdummy = numdummy;
 	return 0;
 }
 #endif
@@ -1242,7 +1284,6 @@ ft_int32_t Ft_Gpu_ClockTrimming(Ft_Gpu_Hal_Context_t *host,ft_int32_t LowFreq)
    for (i=0; (i < 31) && ((f= Ft_Gpu_CurrentFrequency(host)) < LowFreq); i++)
    {
 	   Ft_Gpu_Hal_Wr8(host,REG_TRIM, i);  /* increase the REG_TRIM register value automatically increases the internal clock */
-
    }
 
    Ft_Gpu_Hal_Wr32(host,REG_FREQUENCY,f);  /* Set the final frequency to be used for internal operations */
